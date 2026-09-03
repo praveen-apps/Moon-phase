@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moon Phase</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="theme-color" content="#0c1024">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600&family=Work+Sans:wght@400;500&display=swap');
+
+  :root{
+    --sky-deep:   #0c1024;
+    --sky-mid:    #171b3a;
+    --sky-edge:   #232a54;
+    --star:       #cfd6f2;
+    --star-dim:   #6b73a8;
+    --moonlight:  #f2ecd9;
+    --moon-dark:  #232a4f;
+    --hairline:   rgba(207,214,242,0.14);
+  }
+
+  *{ box-sizing:border-box; margin:0; padding:0; }
+
+  html,body{
+    height:100%;
+    background:#05060f;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family:'Work Sans', sans-serif;
+  }
+
+  .widget{
+    width:320px;
+    border-radius:22px;
+    padding:28px 26px 24px;
+    background:
+      radial-gradient(120% 140% at 50% -10%, var(--sky-edge) 0%, var(--sky-mid) 45%, var(--sky-deep) 100%);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.06) inset,
+      0 30px 60px -20px rgba(0,0,0,0.7);
+    position:relative;
+    overflow:hidden;
+  }
+
+  .stars{
+    position:absolute; inset:0;
+    pointer-events:none;
+  }
+  .stars span{
+    position:absolute;
+    width:2px; height:2px;
+    background:var(--star-dim);
+    border-radius:50%;
+  }
+
+  .content{ position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; }
+
+  canvas#moon{
+    width:150px; height:150px;
+    filter: drop-shadow(0 6px 18px rgba(0,0,0,0.55));
+    margin-top:4px;
+  }
+
+  .pct{
+    font-family:'Fraunces', serif;
+    font-weight:500;
+    font-size:52px;
+    color:var(--moonlight);
+    line-height:1;
+    margin-top:18px;
+    letter-spacing:-0.01em;
+  }
+  .pct sup{
+    font-size:22px;
+    font-weight:400;
+    color:var(--star-dim);
+    top:-1.6em;
+  }
+
+  .phase-name{
+    font-family:'Fraunces', serif;
+    font-weight:400;
+    font-style:italic;
+    font-size:19px;
+    color:var(--star);
+    margin-top:4px;
+  }
+
+  .divider{
+    width:100%;
+    height:1px;
+    background:var(--hairline);
+    margin:20px 0 16px;
+  }
+
+  .meta{
+    width:100%;
+    display:flex;
+    justify-content:space-between;
+    font-size:12.5px;
+    color:var(--star-dim);
+  }
+  .meta .row{ display:flex; flex-direction:column; gap:4px; }
+  .meta .row:last-child{ align-items:flex-end; text-align:right; }
+  .meta .label{ color:var(--star-dim); }
+  .meta .value{ color:var(--star); font-size:13px; }
+
+  .date{
+    margin-top:16px;
+    font-size:12px;
+    color:var(--star-dim);
+    letter-spacing:0.02em;
+  }
+</style>
+</head>
+<body>
+
+<div class="widget">
+  <div class="stars" id="stars"></div>
+  <div class="content">
+    <canvas id="moon" width="300" height="300"></canvas>
+    <div class="pct" id="pct">—<sup>%</sup></div>
+    <div class="phase-name" id="phaseName">Calculating…</div>
+
+    <div class="divider"></div>
+
+    <div class="meta">
+      <div class="row">
+        <span class="label">Next full moon</span>
+        <span class="value" id="nextFull">—</span>
+      </div>
+      <div class="row">
+        <span class="label">Next new moon</span>
+        <span class="value" id="nextNew">—</span>
+      </div>
+    </div>
+
+    <div class="date" id="today">—</div>
+  </div>
+</div>
+
+<script>
+  // ---------- scattered background stars ----------
+  const starsEl = document.getElementById('stars');
+  for(let i=0;i<40;i++){
+    const s = document.createElement('span');
+    s.style.left = Math.random()*100+'%';
+    s.style.top = Math.random()*100+'%';
+    s.style.opacity = (0.2 + Math.random()*0.6).toFixed(2);
+    starsEl.appendChild(s);
+  }
+
+  // ---------- moon phase math ----------
+  // Synodic month length, and a known new moon reference (UTC).
+  const SYNODIC_MONTH = 29.530588853; // days
+  const KNOWN_NEW_MOON = Date.UTC(2000, 0, 6, 18, 14); // Jan 6 2000, 18:14 UTC
+
+  function getPhase(date){
+    const diffDays = (date.getTime() - KNOWN_NEW_MOON) / 86400000;
+    let phase = (diffDays % SYNODIC_MONTH) / SYNODIC_MONTH;
+    if(phase < 0) phase += 1;
+    return phase; // 0 = new, 0.5 = full, 1 = new again
+  }
+
+  function getIllumination(phase){
+    return (1 - Math.cos(2 * Math.PI * phase)) / 2; // 0..1
+  }
+
+  function getPhaseName(phase, illum){
+    const pct = illum * 100;
+    if (pct < 1.5) return "New Moon";
+    if (pct > 98.5) return "Full Moon";
+    if (Math.abs(pct - 50) < 1.5) return phase < 0.5 ? "First Quarter" : "Last Quarter";
+    if (phase < 0.25) return "Waxing Crescent";
+    if (phase < 0.5) return "Waxing Gibbous";
+    if (phase < 0.75) return "Waning Gibbous";
+    return "Waning Crescent";
+  }
+
+  function findNextPhase(date, targetPhase){
+    // step forward in small increments until we cross the target phase value
+    let d = new Date(date);
+    let prev = getPhase(d);
+    for(let i=0; i<48*40; i++){ // up to ~40 days, 30-min steps
+      d = new Date(d.getTime() + 30*60000);
+      const cur = getPhase(d);
+      const crossedUp = prev < targetPhase && cur >= targetPhase;
+      const wrapped = prev > cur && (targetPhase >= prev || targetPhase <= cur);
+      if (crossedUp || (targetPhase === 0 && wrapped)) return d;
+      prev = cur;
+    }
+    return null;
+  }
+
+  function fmtDate(d){
+    if(!d) return "—";
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  // ---------- moon rendering (canvas) ----------
+  function drawMoon(phase){
+    const canvas = document.getElementById('moon');
+    const dpr = window.devicePixelRatio || 1;
+    const size = 300;
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0,0,size,size);
+
+    const R = size/2 - 6;
+    const cx = size/2, cy = size/2;
+
+    // subtle glow behind the disc (clipped to a circle so it doesn't show as a square)
+    const glowR = R * 1.22;
+    const glow = ctx.createRadialGradient(cx, cy, R*0.6, cx, cy, glowR);
+    glow.addColorStop(0, 'rgba(242,236,217,0.18)');
+    glow.addColorStop(1, 'rgba(242,236,217,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowR, 0, Math.PI*2);
+    ctx.fill();
+
+    // base disc (dark / unlit side)
+    const darkGrad = ctx.createRadialGradient(cx-R*0.3, cy-R*0.3, R*0.1, cx, cy, R);
+    darkGrad.addColorStop(0, '#2c3466');
+    darkGrad.addColorStop(1, '#1a1f42');
+    ctx.fillStyle = darkGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI*2);
+    ctx.fill();
+
+    // illuminated region, computed row by row from the terminator formula
+    const waxing = phase < 0.5;
+    const theta = phase * 2 * Math.PI;
+    const a = waxing ? R * Math.cos(theta) : -R * Math.cos(theta);
+
+    const litGrad = ctx.createLinearGradient(cx-R, 0, cx+R, 0);
+    litGrad.addColorStop(0, '#e8e0c8');
+    litGrad.addColorStop(0.5, '#f7f2e2');
+    litGrad.addColorStop(1, '#fffdf5');
+    ctx.fillStyle = litGrad;
+
+    for(let y = -Math.ceil(R); y <= Math.ceil(R); y++){
+      const limSq = R*R - y*y;
+      if(limSq < 0) continue;
+      const lim = Math.sqrt(limSq);
+      const term = (a/R) * lim;
+      let x0, x1;
+      if(waxing){ x0 = term; x1 = lim; }
+      else       { x0 = -lim; x1 = term; }
+      if(x1 > x0){
+        ctx.fillRect(cx + x0, cy + y, (x1 - x0) + 0.6, 1.2);
+      }
+    }
+
+    // thin rim to define the disc edge
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI*2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.stroke();
+  }
+
+  // ---------- render everything ----------
+  function render(){
+    const now = new Date();
+    const phase = getPhase(now);
+    const illum = getIllumination(phase);
+    const pct = Math.round(illum * 100);
+
+    drawMoon(phase);
+
+    document.getElementById('pct').innerHTML = pct + '<sup>%</sup>';
+    document.getElementById('phaseName').textContent = getPhaseName(phase, illum);
+
+    const nextFull = findNextPhase(now, 0.5);
+    const nextNew  = findNextPhase(now, 0);
+    document.getElementById('nextFull').textContent = fmtDate(nextFull);
+    document.getElementById('nextNew').textContent = fmtDate(nextNew);
+
+    document.getElementById('today').textContent = now.toLocaleDateString(undefined, {
+      weekday:'long', month:'long', day:'numeric', year:'numeric'
+    });
+  }
+
+  render();
+  // refresh once an hour in case the widget stays open
+  setInterval(render, 60*60*1000);
+
+  // register service worker for offline / installable support
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+
+</body>
+</html>
